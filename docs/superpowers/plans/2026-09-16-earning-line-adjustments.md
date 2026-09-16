@@ -23,6 +23,11 @@ Every task's requirements implicitly include this section.
   a warning, so a deliberate discard **must** be written `(void) $money->add(...)`.
 - No PHPStan baseline, no `@phpstan-ignore`, no `@codeCoverageIgnore`.
 - Docblocks only for generics (`@return list<DomainEvent>`) and for *why*. Never repeat a type the signature already states.
+- **Domain exceptions are thrown directly with their message at the throw site.** A static
+  factory is justified only when several call sites would otherwise duplicate the wording —
+  currently `CurrencyMismatch::between()`, `InvalidMoneyAmount::overflow()` and
+  `EarningLineNotFound::withId()`. A factory with one caller is indirection that buys nothing;
+  eleven of them were removed in `625346d` and must not come back.
 - Comments are rare and explain *why*, never *what*.
 - Namespace root: `Alcor\Payroll\` → `src/`, `Alcor\Payroll\Tests\` → `tests/`.
 - Dependencies are injected through constructors and interfaces. No container. `bin/scenario.php` is the only composition root.
@@ -2351,10 +2356,10 @@ Implements spec §5.2 and §6 (persistence). Corresponds to `docs/docs.md` phase
 - Consumes: everything from Tasks 1-5.
 - Produces:
   - `interface EventStore { append(string $streamId, int $expectedVersion, array $events): void; load(string $streamId): array; }`
-  - `ConcurrencyConflict::onStream(string $streamId, int $expected, int $actual): self`
+  - `final class ConcurrencyConflict extends \RuntimeException implements DomainException` — no factory; one call site builds the message inline
   - `interface EarningLineRepository { exists(EarningLineId): bool; get(EarningLineId): EarningLine; save(EarningLine): void; }`
   - `EarningLineNotFound::withId(EarningLineId $id): self`
-  - `EarningLineAlreadyExists::withId(EarningLineId $id): self`
+  - `final class EarningLineAlreadyExists extends \DomainException implements DomainException` — no factory; one call site builds the message inline
   - `final class InMemoryEventStore implements EventStore`
   - `final class EventSourcedEarningLineRepository implements EarningLineRepository` — `__construct(EventStore $events)`
 
@@ -2462,15 +2467,6 @@ use Alcor\Payroll\Domain\Shared\DomainException;
  */
 final class ConcurrencyConflict extends \RuntimeException implements DomainException
 {
-    public static function onStream(string $streamId, int $expected, int $actual): self
-    {
-        return new self(sprintf(
-            'Stream %s is at version %d, expected %d.',
-            $streamId,
-            $actual,
-            $expected,
-        ));
-    }
 }
 ```
 
@@ -2528,7 +2524,12 @@ final class InMemoryEventStore implements EventStore
         $stream = $this->streams[$streamId] ?? [];
 
         if (count($stream) !== $expectedVersion) {
-            throw ConcurrencyConflict::onStream($streamId, $expectedVersion, count($stream));
+            throw new ConcurrencyConflict(sprintf(
+                'Stream %s is at version %d, expected %d.',
+                $streamId,
+                count($stream),
+                $expectedVersion,
+            ));
         }
 
         $this->streams[$streamId] = [...$stream, ...$events];
@@ -2686,6 +2687,10 @@ namespace Alcor\Payroll\Domain\EarningLine\Exception;
 use Alcor\Payroll\Domain\EarningLine\EarningLineId;
 use Alcor\Payroll\Domain\Shared\DomainException;
 
+/**
+ * Keeps its factory: raised from both the repository and the audit query handler, so
+ * inlining would duplicate the wording across two layers.
+ */
 final class EarningLineNotFound extends \RuntimeException implements DomainException
 {
     public static function withId(EarningLineId $id): self
@@ -2704,15 +2709,10 @@ declare(strict_types=1);
 
 namespace Alcor\Payroll\Domain\EarningLine\Exception;
 
-use Alcor\Payroll\Domain\EarningLine\EarningLineId;
 use Alcor\Payroll\Domain\Shared\DomainException;
 
 final class EarningLineAlreadyExists extends \DomainException implements DomainException
 {
-    public static function withId(EarningLineId $id): self
-    {
-        return new self(sprintf('Earning line %s has already been calculated.', $id->value));
-    }
 }
 ```
 
@@ -3264,7 +3264,9 @@ final class CalculateEarningLineHandler
         // not a race, and reporting it as one would make ConcurrencyConflict
         // mean two different things.
         if ($this->lines->exists($id)) {
-            throw EarningLineAlreadyExists::withId($id);
+            throw new EarningLineAlreadyExists(
+                sprintf('Earning line %s has already been calculated.', $id->value),
+            );
         }
 
         $this->lines->save(EarningLine::calculate(
