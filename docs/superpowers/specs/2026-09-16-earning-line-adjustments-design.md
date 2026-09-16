@@ -34,9 +34,12 @@ past correction, because past corrections are not stored as mutable rows.
 Rule 3 — permanent immunity to recalculation — is the second reason. A CRUD
 model would store a `system_value` column that recalculation overwrites, and
 immunity would depend on remembering to check a flag at every write site. As an
-event stream, the frozen value is simply the last `EarningLineRecalculated`
-before the first `ManualAdjustmentAdded`; later recalculations are recorded as
-`SystemRecalculationIgnored` and change nothing.
+event stream, the frozen value is simply the latest system value in effect when
+the first `ManualAdjustmentAdded` is recorded — carried by whichever of
+`EarningLineCalculated` or `EarningLineRecalculated` came last, so a line
+adjusted without ever being recalculated freezes at its originally calculated
+value. Later recalculations are recorded as `SystemRecalculationIgnored` and
+change nothing.
 
 A plain OO model would also satisfy the brief and would be a defensible answer.
 The README will say so explicitly and give the trade-off: event sourcing costs
@@ -76,8 +79,9 @@ handler. `docs/docs.md` §2/§5 have been updated to match.
 Exceptions sit next to what raises them: `Domain/Shared/Exception/` holds
 `InvalidMoneyAmount` and `CurrencyMismatch`; `Domain/EarningLine/Exception/`
 holds `InvalidComment`, `InvalidEarningLineId`, `InvalidSpecialistId`,
-`InvalidAdjustmentNumber`, `ZeroAdjustmentNotAllowed`, `UnknownAdjustment` and
-`EarningLineNotFound` (raised by the repository port's contract).
+`InvalidAdjustmentNumber`, `ZeroAdjustmentNotAllowed`, `UnknownAdjustment`,
+`EarningLineNotFound` and `EarningLineAlreadyExists` (the last two belong to the
+repository port's contract).
 
 `Money` rules:
 
@@ -93,6 +97,12 @@ holds `InvalidComment`, `InvalidEarningLineId`, `InvalidSpecialistId`,
 - `add()` and `negate()` are `#[\NoDiscard]`. `add()` on a different currency
   throws `CurrencyMismatch`. `isZero()` and `equals()` complete the surface;
   `equals()` across currencies is `false`, not an error.
+- Arithmetic guards overflow on the same principle as parsing: `add()` throws
+  `InvalidMoneyAmount` when the sum would leave the `int` range, and `negate()`
+  throws it for `PHP_INT_MIN`, whose negation is not representable. Parsing
+  already refuses to build such values, so these guard against sums of
+  individually valid amounts — a wrapped total is a correctness bug, not an
+  edge case.
 - `$minor` and `$currency` are public readonly so `MoneyFormatter` can read them
   without accessor noise. Formatting lives outside the domain.
 
@@ -150,21 +160,32 @@ No setters, no `update*`, no `remove*`, no `delete*`.
 
 | Rule | Enforced by | Result |
 |---|---|---|
+| Recalculation in a different currency | `recalculate()` compares `$newSystemValue->currency` against the line's `currency`, **first, in both states** | `CurrencyMismatch`; nothing recorded |
 | Recalculation before any adjustment | `recalculate()` with `status === SystemCalculated` | records `EarningLineRecalculated` |
 | Recalculation with an unchanged value, before any adjustment | `recalculate()` value comparison | records nothing |
 | Recalculation after an adjustment | `recalculate()` with `status === ManuallyAdjusted` | records `SystemRecalculationIgnored($attemptedValue)`; state unchanged. Auditable drift, not an exception |
-
-The unchanged-value short-circuit applies **only** while the line is still
-`SystemCalculated`. Once it is `ManuallyAdjusted`, every recalculation attempt
-is recorded as ignored regardless of the attempted value: the audit fact is
-that the system tried and was refused, which is true even when the attempted
-value happens to match. `SystemRecalculationIgnored` is an appended event and
-therefore advances the stream version, even though it changes no state.
 | Mandatory comment | `Comment` constructor | `InvalidComment` |
 | Zero adjustment | `addAdjustment()` | `ZeroAdjustmentNotAllowed` |
-| Cross-currency adjustment | `addAdjustment()` / `Money::add()` | `CurrencyMismatch` |
+| Cross-currency adjustment | `addAdjustment()` explicit currency check | `CurrencyMismatch` |
 | Unknown compensation target | `addAdjustment()` bounds-checks against `lastAdjustmentNumber` | `UnknownAdjustment` |
 | Freeze on first adjustment | `applyManualAdjustmentAdded()` flips `status`; no transition back exists | permanent |
+| Calculating a line that already exists | `CalculateEarningLineHandler` checks the repository first | `EarningLineAlreadyExists` |
+
+**Currency is checked first, and explicitly.** Both `recalculate()` and
+`addAdjustment()` compare the incoming `Currency` against the line's own before
+anything else happens, in every status — a cross-currency recalculation of an
+already-frozen line is still a `CurrencyMismatch`, not a silently ignored
+recalculation. `Money::equals()` returns `false` across currencies, and that
+`false` must never be pressed into service as the currency check: it conflates
+"a different amount" with "a different currency", and would let a cross-currency
+recalculation be recorded as an ordinary value change.
+
+**The unchanged-value short-circuit applies only while the line is still
+`SystemCalculated`.** Once it is `ManuallyAdjusted`, every recalculation attempt
+is recorded as ignored regardless of the attempted value: the audit fact is that
+the system tried and was refused, which is true even when the attempted value
+happens to match. `SystemRecalculationIgnored` is an appended event and
+therefore advances the stream version, even though it changes no state.
 
 ### 4.4 Events
 
@@ -220,6 +241,14 @@ dependencies: `EarningLineRepository` and `Psr\Clock\ClockInterface`. The
 aggregate still returns the assigned `AdjustmentNumber`; the handler discards
 it, and the CLI reads numbers back through `GetEarningLineAudit`.
 
+`CalculateEarningLineHandler` asks the repository whether the line already
+exists and raises `EarningLineAlreadyExists` if it does. Letting the append
+collide and surface a `ConcurrencyConflict` would report a race that did not
+happen: `ConcurrencyConflict` is reserved for genuine version races between
+concurrent writers, and conflating the two would make the store's contract
+unreadable. The domain port therefore carries `exists(EarningLineId): bool`
+alongside `get()` and `save()`.
+
 ### 5.2 Port
 
 ```php
@@ -257,12 +286,22 @@ final readonly class AuditHistoryView {
     /** @param list<AdjustmentEntry> $adjustments
      *  @param list<IgnoredRecalculation> $ignoredRecalculations */
     public function __construct(
-        public string $lineId, public Money $frozenSystemValue,
+        public string $lineId,
+        public Money $systemValue,          // latest system value ever recorded
+        public ?Money $frozenSystemValue,   // null until the first adjustment
         public array $adjustments, public array $ignoredRecalculations,
         public Money $currentValue,
     ) {}
 }
 ```
+
+`frozenSystemValue` is `null` while the line has no manual adjustment, because
+nothing is frozen yet — a view that labelled the live value "frozen" would be
+lying about the one rule the audit exists to evidence. From the first adjustment
+onward it is set and never changes, and it equals `systemValue`, since every
+later recalculation is ignored. Keeping both fields makes the view a total
+function over the line's whole life rather than one that only reads correctly
+after step 3.
 
 `currentValue` is accumulated **inside** the fold, not recomputed afterwards —
 the projection is one pass over the stream. The pipe operator `|>` is used only
@@ -309,7 +348,22 @@ in tests: money is built with `Money::fromDecimal('1050.00', Currency::USD)`.
 
 Also covered: reconstitution from events yields identical state; concurrency
 conflict; empty and whitespace-only comments; zero amount; unknown compensated
-number; currency mismatch.
+number.
+
+Specifically required by the rules above:
+
+- `recalculate()` in a foreign currency raises `CurrencyMismatch` and records
+  nothing — asserted in **both** statuses, `SystemCalculated` and
+  `ManuallyAdjusted`.
+- The projection is asserted **before** the first adjustment
+  (`frozenSystemValue === null`, `systemValue` live) and **after** it
+  (`frozenSystemValue` set, equal to `systemValue`, unmoved by later ignored
+  recalculations).
+- `CalculateEarningLine` on an existing line raises `EarningLineAlreadyExists`,
+  while a genuine version race raises `ConcurrencyConflict` — two separate
+  tests, so the two failures cannot be confused.
+- `Money::add()` overflow and `Money::negate()` of `PHP_INT_MIN` raise
+  `InvalidMoneyAmount`.
 
 ## 8. Assumptions
 
