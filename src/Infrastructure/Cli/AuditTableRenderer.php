@@ -23,7 +23,11 @@ final class AuditTableRenderer
         foreach ($view->adjustments as $entry) {
             $rows[] = [
                 sprintf('Adjustment %d', $entry->number),
-                $this->money->format($entry->amount),
+                // An adjustment is a signed delta, unlike every other row in
+                // this table: the '+' is added here, not in MoneyFormatter,
+                // because a leading '+' on a system value or a current value
+                // would be wrong. Zero cannot occur (ZeroAdjustmentNotAllowed).
+                ($entry->amount->minor > 0 ? '+' : '') . $this->money->format($entry->amount),
                 $entry->compensates === null
                     ? $entry->comment
                     : sprintf('%s (compensates #%d)', $entry->comment, $entry->compensates),
