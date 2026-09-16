@@ -19,6 +19,8 @@ Every task's requirements implicitly include this section.
 - `final` by default. `readonly` classes for value objects, events, commands and views.
 - `#[\Override]` on every method implementing an interface or overriding a parent.
 - `#[\NoDiscard]` on `Money::add()`, `Money::negate()` and `EarningLine::pullRecordedEvents()`.
+  PHPUnit runs with `failOnWarning="true"`, and discarding a `#[\NoDiscard]` result raises
+  a warning, so a deliberate discard **must** be written `(void) $money->add(...)`.
 - No PHPStan baseline, no `@phpstan-ignore`, no `@codeCoverageIgnore`.
 - Docblocks only for generics (`@return list<DomainEvent>`) and for *why*. Never repeat a type the signature already states.
 - Comments are rare and explain *why*, never *what*.
@@ -345,7 +347,10 @@ final class MoneyTest extends TestCase
     public function test_adding_leaves_the_original_untouched(): void
     {
         $original = Money::fromDecimal('10.00', Currency::USD);
-        $original->add(Money::fromDecimal('1.00', Currency::USD));
+
+        // (void) is how PHP 8.5 spells a deliberate discard of a #[\NoDiscard]
+        // result; without it this raises a warning and PHPUnit fails the test.
+        (void) $original->add(Money::fromDecimal('1.00', Currency::USD));
 
         self::assertSame(1_000, $original->minor);
     }
@@ -2867,13 +2872,16 @@ use PHPUnit\Framework\TestCase;
 
 final class CalculateEarningLineHandlerTest extends TestCase
 {
+    private InMemoryEventStore $store;
+
     private EventSourcedEarningLineRepository $lines;
 
     private CalculateEarningLineHandler $handle;
 
     protected function setUp(): void
     {
-        $this->lines = new EventSourcedEarningLineRepository(new InMemoryEventStore());
+        $this->store = new InMemoryEventStore();
+        $this->lines = new EventSourcedEarningLineRepository($this->store);
         $this->handle = new CalculateEarningLineHandler($this->lines, new FrozenClock());
     }
 
@@ -2886,12 +2894,12 @@ final class CalculateEarningLineHandlerTest extends TestCase
 
     public function test_it_stamps_the_event_with_the_injected_clock(): void
     {
-        $clock = new FrozenClock(new \DateTimeImmutable('2026-03-01T09:00:00+00:00'));
-        $handle = new CalculateEarningLineHandler($this->lines, $clock);
+        $at = new \DateTimeImmutable('2026-03-01T09:00:00+00:00');
+        $handle = new CalculateEarningLineHandler($this->lines, new FrozenClock($at));
 
         $handle(new CalculateEarningLine(TestIds::LINE, '1000.00', 'USD'));
 
-        self::assertTrue($this->lines->exists(new EarningLineId(TestIds::LINE)));
+        self::assertEquals($at, $this->store->load(TestIds::LINE)[0]->occurredAt);
     }
 
     public function test_calculating_the_same_line_twice_is_refused_as_a_duplicate(): void
