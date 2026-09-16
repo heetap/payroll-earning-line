@@ -1,0 +1,50 @@
+{
+    "name": "alcor/payroll-earning-line",
+    "description": "Event-sourced domain model for manual adjustments to a payroll earning line.",
+    "type": "project",
+    "license": "MIT",
+    "require": {
+        "php": "^8.5",
+        "psr/clock": "^1.0"
+    },
+    "require-dev": {
+        "friendsofphp/php-cs-fixer": "^3.90",
+        "phpstan/phpstan": "^2.1",
+        "phpstan/phpstan-phpunit": "^2.0",
+        "phpstan/phpstan-strict-rules": "^2.0",
+        "phpunit/phpunit": "^12.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Alcor\\Payroll\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Alcor\\Payroll\\Tests\\": "tests/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "scripts": {
+        "test": "phpunit",
+        "analyse": "phpstan analyse",
+        "cs": "php-cs-fixer check --diff",
+        "cs:fix": "php-cs-fixer fix",
+        "check": [
+            "@cs",
+            "@analyse",
+            "@test"
+        ],
+        "scenario": "php bin/scenario.php"
+    },
+    "scripts-descriptions": {
+        "test": "Run the PHPUnit test suite.",
+        "analyse": "Run PHPStan at level max.",
+        "cs": "Check coding standards without changing files.",
+        "cs:fix": "Apply coding standard fixes.",
+        "check": "Run cs, analyse and test.",
+        "scenario": "Print the reference scenario step by step."
+    }
+}
