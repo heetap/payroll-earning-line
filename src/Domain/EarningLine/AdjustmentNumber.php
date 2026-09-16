@@ -19,11 +19,6 @@ final readonly class AdjustmentNumber
         }
     }
 
-    public function next(): self
-    {
-        return new self($this->value + 1);
-    }
-
     public function equals(self $other): bool
     {
         return $this->value === $other->value;

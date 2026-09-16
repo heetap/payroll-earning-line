@@ -109,18 +109,6 @@ final class MoneyTest extends TestCase
         (void) Money::ofMinor(\PHP_INT_MIN, Currency::USD)->add(Money::ofMinor(-1, Currency::USD));
     }
 
-    public function test_it_negates(): void
-    {
-        self::assertSame(4_555, Money::fromDecimal('-45.55', Currency::USD)->negate()->minor);
-    }
-
-    public function test_negating_the_smallest_integer_is_refused(): void
-    {
-        $this->expectException(InvalidMoneyAmount::class);
-
-        (void) Money::ofMinor(\PHP_INT_MIN, Currency::USD)->negate();
-    }
-
     public function test_zero_is_zero(): void
     {
         self::assertTrue(Money::zero(Currency::USD)->isZero());

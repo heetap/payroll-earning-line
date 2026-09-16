@@ -94,13 +94,12 @@ repository port's contract).
 - Parsing rejects values that would not survive the cast to `int`, compared as
   digit strings against `PHP_INT_MAX`. A silently truncated money amount is a
   correctness bug, not an edge case.
-- `add()` and `negate()` are `#[\NoDiscard]`. `add()` on a different currency
-  throws `CurrencyMismatch`. `isZero()` and `equals()` complete the surface;
+- `add()` is `#[\NoDiscard]`. `add()` on a different currency throws
+  `CurrencyMismatch`. `isZero()` and `equals()` complete the surface;
   `equals()` across currencies is `false`, not an error.
 - Arithmetic guards overflow on the same principle as parsing: `add()` throws
-  `InvalidMoneyAmount` when the sum would leave the `int` range, and `negate()`
-  throws it for `PHP_INT_MIN`, whose negation is not representable. Parsing
-  already refuses to build such values, so these guard against sums of
+  `InvalidMoneyAmount` when the sum would leave the `int` range. Parsing
+  already refuses to build such values, so this guards against sums of
   individually valid amounts — a wrapped total is a correctness bug, not an
   edge case.
 - `$minor` and `$currency` are public readonly so `MoneyFormatter` can read them
@@ -364,8 +363,7 @@ Specifically required by the rules above:
 - `CalculateEarningLine` on an existing line raises `EarningLineAlreadyExists`,
   while a genuine version race raises `ConcurrencyConflict` — two separate
   tests, so the two failures cannot be confused.
-- `Money::add()` overflow and `Money::negate()` of `PHP_INT_MIN` raise
-  `InvalidMoneyAmount`.
+- `Money::add()` overflow raises `InvalidMoneyAmount`.
 
 ## 8. Assumptions
 

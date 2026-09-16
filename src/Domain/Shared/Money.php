@@ -73,16 +73,6 @@ final readonly class Money
         return new self($this->minor + $other->minor, $this->currency);
     }
 
-    #[NoDiscard]
-    public function negate(): self
-    {
-        if ($this->minor === \PHP_INT_MIN) {
-            throw InvalidMoneyAmount::overflow();
-        }
-
-        return new self(-$this->minor, $this->currency);
-    }
-
     public function isZero(): bool
     {
         return $this->minor === 0;
