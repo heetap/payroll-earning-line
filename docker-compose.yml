@@ -1,0 +1,15 @@
+# Development loop: run every tool inside PHP 8.5 without installing it locally.
+#   docker compose run --rm php composer check
+#   docker compose run --rm php composer scenario
+#
+# Dependencies are installed on the host (`composer install`) and bind-mounted
+# in; the container never writes to vendor/.
+services:
+  php:
+    build:
+      context: .
+      target: base
+    working_dir: /app
+    volumes:
+      - .:/app
+    command: composer check
