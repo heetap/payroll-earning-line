@@ -17,13 +17,13 @@ final readonly class Comment
         $trimmed = trim($value);
 
         if ($trimmed === '') {
-            throw InvalidComment::blank();
+            throw new InvalidComment('An adjustment must explain itself: the comment is mandatory.');
         }
 
         $length = mb_strlen($trimmed);
 
         if ($length > self::MAX_LENGTH) {
-            throw InvalidComment::tooLong($length, self::MAX_LENGTH);
+            throw new InvalidComment(sprintf('A comment may be at most %d characters, got %d.', self::MAX_LENGTH, $length));
         }
 
         $this->value = $trimmed;

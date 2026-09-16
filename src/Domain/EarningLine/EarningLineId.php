@@ -18,7 +18,7 @@ final readonly class EarningLineId
         $normalised = strtolower(trim($value));
 
         if (preg_match(self::PATTERN, $normalised) !== 1) {
-            throw InvalidEarningLineId::notAUuid($value);
+            throw new InvalidEarningLineId(sprintf('An earning line id must be a UUID, got "%s".', $value));
         }
 
         $this->value = $normalised;

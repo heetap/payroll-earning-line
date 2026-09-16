@@ -31,7 +31,11 @@ final readonly class Money
         $fraction = $scale > 0 ? sprintf('(?:\.(?<fraction>\d{1,%d}))?', $scale) : '';
 
         if (preg_match('/\A(?<sign>[+-])?(?<units>\d+)' . $fraction . '\z/', $amount, $matches) !== 1) {
-            throw InvalidMoneyAmount::notDecimal($amount, $currency);
+            throw new InvalidMoneyAmount(sprintf(
+                'Expected a decimal amount with at most %d decimal places, got "%s".',
+                $currency->minorUnits(),
+                $amount,
+            ));
         }
 
         $digits = ltrim($matches['units'] . str_pad($matches['fraction'] ?? '', $scale, '0'), '0');
@@ -41,7 +45,7 @@ final readonly class Money
         }
 
         if (self::exceedsIntegerRange($digits)) {
-            throw InvalidMoneyAmount::outOfRange($amount);
+            throw new InvalidMoneyAmount(sprintf('Amount "%s" does not fit in the supported range.', $amount));
         }
 
         $minor = (int) $digits;

@@ -25,6 +25,6 @@ enum Currency: string
 
     public static function fromCode(string $code): self
     {
-        return self::tryFrom($code) ?? throw UnsupportedCurrency::code($code);
+        return self::tryFrom($code) ?? throw new UnsupportedCurrency(sprintf('Currency "%s" is not supported.', $code));
     }
 }

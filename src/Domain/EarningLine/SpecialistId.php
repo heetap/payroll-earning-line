@@ -21,13 +21,13 @@ final readonly class SpecialistId
         $trimmed = trim($value);
 
         if ($trimmed === '') {
-            throw InvalidSpecialistId::blank();
+            throw new InvalidSpecialistId('An adjustment must record who made it.');
         }
 
         $length = mb_strlen($trimmed);
 
         if ($length > self::MAX_LENGTH) {
-            throw InvalidSpecialistId::tooLong($length, self::MAX_LENGTH);
+            throw new InvalidSpecialistId(sprintf('A specialist id may be at most %d characters, got %d.', self::MAX_LENGTH, $length));
         }
 
         $this->value = $trimmed;

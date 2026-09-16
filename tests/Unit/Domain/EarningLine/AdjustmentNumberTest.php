@@ -11,20 +11,15 @@ use PHPUnit\Framework\TestCase;
 
 final class AdjustmentNumberTest extends TestCase
 {
-    public function test_the_first_adjustment_on_a_line_is_number_one(): void
+    public function test_adjustments_are_numbered_from_one_upwards(): void
     {
-        self::assertSame(1, AdjustmentNumber::first()->value);
-    }
-
-    public function test_numbers_run_in_sequence(): void
-    {
-        self::assertSame(2, AdjustmentNumber::first()->next()->value);
-        self::assertSame(3, AdjustmentNumber::first()->next()->next()->value);
+        self::assertSame(2, new AdjustmentNumber(1)->next()->value);
+        self::assertSame(3, new AdjustmentNumber(1)->next()->next()->value);
     }
 
     public function test_next_leaves_the_original_untouched(): void
     {
-        $first = AdjustmentNumber::first();
+        $first = new AdjustmentNumber(1);
         $first->next();
 
         self::assertSame(1, $first->value);

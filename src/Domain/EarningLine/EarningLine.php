@@ -88,13 +88,20 @@ final class EarningLine
         $this->assertSameCurrency($amount);
 
         if ($amount->isZero()) {
-            throw ZeroAdjustmentNotAllowed::forLine($this->id);
+            throw new ZeroAdjustmentNotAllowed(sprintf(
+                'An adjustment of zero would freeze line %s without correcting anything.',
+                $this->id->value,
+            ));
         }
 
         // Numbers are handed out in sequence from 1, so the set of adjustments
         // that exist is exactly 1..lastAdjustmentNumber.
         if ($compensates !== null && $compensates->value > $this->lastAdjustmentNumber) {
-            throw UnknownAdjustment::number($compensates, $this->id);
+            throw new UnknownAdjustment(sprintf(
+                'Line %s has no adjustment #%d to compensate.',
+                $this->id->value,
+                $compensates->value,
+            ));
         }
 
         $number = new AdjustmentNumber($this->lastAdjustmentNumber + 1);

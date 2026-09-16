@@ -15,13 +15,8 @@ final readonly class AdjustmentNumber
     public function __construct(public int $value)
     {
         if ($value < 1) {
-            throw InvalidAdjustmentNumber::notPositive($value);
+            throw new InvalidAdjustmentNumber(sprintf('Adjustments are numbered from 1, got %d.', $value));
         }
-    }
-
-    public static function first(): self
-    {
-        return new self(1);
     }
 
     public function next(): self
