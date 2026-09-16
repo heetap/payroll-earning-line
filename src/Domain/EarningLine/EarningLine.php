@@ -8,6 +8,7 @@ use Alcor\Payroll\Domain\EarningLine\Event\EarningLineCalculated;
 use Alcor\Payroll\Domain\EarningLine\Event\EarningLineRecalculated;
 use Alcor\Payroll\Domain\EarningLine\Event\ManualAdjustmentAdded;
 use Alcor\Payroll\Domain\EarningLine\Event\SystemRecalculationIgnored;
+use Alcor\Payroll\Domain\EarningLine\Exception\UnknownAdjustment;
 use Alcor\Payroll\Domain\EarningLine\Exception\ZeroAdjustmentNotAllowed;
 use Alcor\Payroll\Domain\Shared\Currency;
 use Alcor\Payroll\Domain\Shared\DomainEvent;
@@ -82,6 +83,7 @@ final class EarningLine
         Comment $comment,
         SpecialistId $by,
         DateTimeImmutable $at,
+        ?AdjustmentNumber $compensates = null,
     ): AdjustmentNumber {
         $this->assertSameCurrency($amount);
 
@@ -89,9 +91,15 @@ final class EarningLine
             throw ZeroAdjustmentNotAllowed::forLine($this->id);
         }
 
+        // Numbers are handed out in sequence from 1, so the set of adjustments
+        // that exist is exactly 1..lastAdjustmentNumber.
+        if ($compensates !== null && $compensates->value > $this->lastAdjustmentNumber) {
+            throw UnknownAdjustment::number($compensates, $this->id);
+        }
+
         $number = new AdjustmentNumber($this->lastAdjustmentNumber + 1);
 
-        $this->record(new ManualAdjustmentAdded($this->id, $number, $amount, $comment, $by, $at));
+        $this->record(new ManualAdjustmentAdded($this->id, $number, $amount, $comment, $by, $compensates, $at));
 
         return $number;
     }

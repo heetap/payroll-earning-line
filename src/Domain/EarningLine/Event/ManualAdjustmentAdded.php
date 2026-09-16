@@ -20,6 +20,7 @@ final readonly class ManualAdjustmentAdded implements DomainEvent
         public Money $amount,
         public Comment $comment,
         public SpecialistId $by,
+        public ?AdjustmentNumber $compensates,
         public DateTimeImmutable $occurredAt,
     ) {}
 }

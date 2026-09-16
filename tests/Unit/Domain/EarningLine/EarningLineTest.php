@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Alcor\Payroll\Tests\Unit\Domain\EarningLine;
 
+use Alcor\Payroll\Domain\EarningLine\AdjustmentNumber;
 use Alcor\Payroll\Domain\EarningLine\Comment;
 use Alcor\Payroll\Domain\EarningLine\EarningLine;
 use Alcor\Payroll\Domain\EarningLine\EarningLineId;
@@ -11,6 +12,7 @@ use Alcor\Payroll\Domain\EarningLine\Event\EarningLineCalculated;
 use Alcor\Payroll\Domain\EarningLine\Event\EarningLineRecalculated;
 use Alcor\Payroll\Domain\EarningLine\Event\ManualAdjustmentAdded;
 use Alcor\Payroll\Domain\EarningLine\Event\SystemRecalculationIgnored;
+use Alcor\Payroll\Domain\EarningLine\Exception\UnknownAdjustment;
 use Alcor\Payroll\Domain\EarningLine\Exception\ZeroAdjustmentNotAllowed;
 use Alcor\Payroll\Domain\EarningLine\SpecialistId;
 use Alcor\Payroll\Domain\Shared\Currency;
@@ -272,5 +274,102 @@ final class EarningLineTest extends TestCase
         );
 
         self::assertSame(-4_000, $line->currentValue()->minor);
+    }
+
+    public function test_a_mistake_is_fixed_by_a_new_adjustment_that_points_at_it(): void
+    {
+        $line = EarningLineScenario::lineWith(
+            EarningLineScenario::calculated('1000.00'),
+            EarningLineScenario::adjusted(1, '-45.55'),
+            EarningLineScenario::adjusted(2, '-0.20'),
+        );
+
+        $number = $line->addAdjustment(
+            Money::fromDecimal('0.20', Currency::USD),
+            new Comment('Correcting mistake in adjustment #2'),
+            new SpecialistId(TestIds::SPECIALIST),
+            EarningLineScenario::at(),
+            new AdjustmentNumber(2),
+        );
+
+        $events = $line->pullRecordedEvents();
+
+        self::assertSame(3, $number->value);
+        self::assertInstanceOf(ManualAdjustmentAdded::class, $events[0]);
+        self::assertNotNull($events[0]->compensates);
+        self::assertSame(2, $events[0]->compensates->value);
+        // 1000.00 - 45.55 - 0.20 + 0.20
+        self::assertSame(95_445, $line->currentValue()->minor);
+    }
+
+    public function test_an_ordinary_adjustment_compensates_nothing(): void
+    {
+        $line = EarningLineScenario::lineWith(EarningLineScenario::calculated('1000.00'));
+
+        $line->addAdjustment(
+            Money::fromDecimal('10.00', Currency::USD),
+            new Comment('Late bonus'),
+            new SpecialistId(TestIds::SPECIALIST),
+            EarningLineScenario::at(),
+        );
+
+        $events = $line->pullRecordedEvents();
+
+        self::assertInstanceOf(ManualAdjustmentAdded::class, $events[0]);
+        self::assertNull($events[0]->compensates);
+    }
+
+    public function test_a_correction_cannot_point_at_an_adjustment_that_does_not_exist(): void
+    {
+        $line = EarningLineScenario::lineWith(
+            EarningLineScenario::calculated('1000.00'),
+            EarningLineScenario::adjusted(1, '-45.55'),
+        );
+
+        $this->expectException(UnknownAdjustment::class);
+
+        $line->addAdjustment(
+            Money::fromDecimal('0.20', Currency::USD),
+            new Comment('Correcting mistake in adjustment #7'),
+            new SpecialistId(TestIds::SPECIALIST),
+            EarningLineScenario::at(),
+            new AdjustmentNumber(7),
+        );
+    }
+
+    public function test_a_correction_cannot_point_at_the_adjustment_being_created(): void
+    {
+        $line = EarningLineScenario::lineWith(
+            EarningLineScenario::calculated('1000.00'),
+            EarningLineScenario::adjusted(1, '-45.55'),
+        );
+
+        $this->expectException(UnknownAdjustment::class);
+
+        $line->addAdjustment(
+            Money::fromDecimal('0.20', Currency::USD),
+            new Comment('Correcting itself'),
+            new SpecialistId(TestIds::SPECIALIST),
+            EarningLineScenario::at(),
+            new AdjustmentNumber(2),
+        );
+    }
+
+    public function test_compensation_is_a_link_not_an_enforced_opposite_amount(): void
+    {
+        $line = EarningLineScenario::lineWith(
+            EarningLineScenario::calculated('1000.00'),
+            EarningLineScenario::adjusted(1, '-50.00'),
+        );
+
+        $line->addAdjustment(
+            Money::fromDecimal('20.00', Currency::USD),
+            new Comment('Partially reversing adjustment #1'),
+            new SpecialistId(TestIds::SPECIALIST),
+            EarningLineScenario::at(),
+            new AdjustmentNumber(1),
+        );
+
+        self::assertSame(97_000, $line->currentValue()->minor);
     }
 }

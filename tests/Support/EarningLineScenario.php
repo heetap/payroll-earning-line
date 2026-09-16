@@ -52,6 +52,7 @@ final class EarningLineScenario
         int $number,
         string $amount,
         string $comment = 'correction',
+        ?int $compensates = null,
         Currency $currency = Currency::USD,
     ): ManualAdjustmentAdded {
         return new ManualAdjustmentAdded(
@@ -60,6 +61,7 @@ final class EarningLineScenario
             Money::fromDecimal($amount, $currency),
             new Comment($comment),
             new SpecialistId(TestIds::SPECIALIST),
+            $compensates === null ? null : new AdjustmentNumber($compensates),
             self::at(),
         );
     }
