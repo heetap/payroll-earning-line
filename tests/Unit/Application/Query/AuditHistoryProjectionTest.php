@@ -9,9 +9,11 @@ use Alcor\Payroll\Application\Query\AuditHistoryProjection;
 use Alcor\Payroll\Domain\EarningLine\EarningLineId;
 use Alcor\Payroll\Domain\EarningLine\Event\SystemRecalculationIgnored;
 use Alcor\Payroll\Domain\Shared\Currency;
+use Alcor\Payroll\Domain\Shared\DomainEvent;
 use Alcor\Payroll\Domain\Shared\Money;
 use Alcor\Payroll\Tests\Support\EarningLineScenario;
 use Alcor\Payroll\Tests\Support\TestIds;
+use DateTimeImmutable;
 use LogicException;
 use PHPUnit\Framework\TestCase;
 
@@ -127,5 +129,17 @@ final class AuditHistoryProjectionTest extends TestCase
         $this->expectException(LogicException::class);
 
         $this->project->project($this->id, [EarningLineScenario::adjusted(1, '10.00')]);
+    }
+
+    public function test_an_unknown_event_type_fails_loudly_instead_of_being_ignored(): void
+    {
+        $stranger = new class (EarningLineScenario::at()) implements DomainEvent {
+            public function __construct(public DateTimeImmutable $occurredAt) {}
+        };
+
+        $this->expectException(LogicException::class);
+        $this->expectExceptionMessage('Unhandled event');
+
+        $this->project->project($this->id, [EarningLineScenario::calculated('1000.00'), $stranger]);
     }
 }

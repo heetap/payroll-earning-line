@@ -210,6 +210,15 @@ Every test name below was checked against
     only that the line's value must not move. The scenario and the acceptance
     test use `1075.00`, chosen to differ from the frozen `1050.00` so that the
     test would fail if the value were silently adopted.
+14. The audit history reports the frozen system value, the corrections and the
+    current value — not the accepted recalculations that preceded the first
+    correction. This matches the expected audit history in the assignment
+    brief exactly. Refused recalculations *are* reported, which is more than
+    the brief asks for, because the drift between what the system would pay
+    and what the specialist decided is worth seeing.
+15. An earning line carries no employee, payroll period or earning-type
+    reference. None of the six business rules needs one, and adding them
+    would model a payroll system rather than the rule under test.
 
 ## Trade-offs and what I would do next
 
@@ -237,7 +246,9 @@ version after any pending, unsaved events — so it goes stale immediately
 after `save()`. This never bites in practice because every command handler
 loads a fresh aggregate, uses it once, and discards it, but it is a sharp
 edge for any future code that keeps an aggregate instance around across
-multiple saves.
+multiple saves. `save()` also drains the aggregate's pending events before
+appending them, so a failed append leaves the instance empty — a retry on
+that same instance would write nothing; a retry must reload.
 
 **Left for later, in roughly the order I'd tackle them:**
 

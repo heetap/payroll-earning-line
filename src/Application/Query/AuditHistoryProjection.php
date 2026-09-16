@@ -15,7 +15,15 @@ use LogicException;
 
 final class AuditHistoryProjection
 {
-    /** @param iterable<DomainEvent> $events */
+    /**
+     * The fold is an if/continue chain rather than the aggregate's
+     * match (true): each arm here advances up to five accumulators at once
+     * ($systemValue, $frozenSystemValue, $currentValue, $adjustments,
+     * $ignoredRecalculations), and a match arm's expression cannot carry
+     * that — it produces one value, not a set of side effects.
+     *
+     * @param iterable<DomainEvent> $events
+     */
     public function project(EarningLineId $id, iterable $events): AuditHistoryView
     {
         $systemValue = null;

@@ -18,6 +18,7 @@ use Alcor\Payroll\Infrastructure\Persistence\EventSourcedEarningLineRepository;
 use Alcor\Payroll\Infrastructure\Persistence\InMemoryEventStore;
 use Alcor\Payroll\Tests\Support\FrozenClock;
 use Alcor\Payroll\Tests\Support\TestIds;
+use DateTimeImmutable;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -155,6 +156,25 @@ final class ReferenceScenarioTest extends TestCase
 
         self::assertCount(1, $view->ignoredRecalculations, 'step 4 was refused and recorded');
         self::assertSame(107_500, $view->ignoredRecalculations[0]->attemptedValue->minor);
+
+        // Assumption 8: every adjustment records who made it and when. The
+        // clock advances 60 seconds before each step, so each timestamp is
+        // distinct and their order pins the plumbing, not just the amounts.
+        $adjustmentTimestamps = array_map(
+            static fn(AdjustmentEntry $entry): DateTimeImmutable => $entry->at,
+            $view->adjustments,
+        );
+        for ($i = 1; $i < count($adjustmentTimestamps); $i++) {
+            self::assertGreaterThan(
+                $adjustmentTimestamps[$i - 1],
+                $adjustmentTimestamps[$i],
+                sprintf('adjustment %d should be recorded after adjustment %d', $i + 1, $i),
+            );
+        }
+
+        $ignoredAt = $view->ignoredRecalculations[0]->at;
+        self::assertGreaterThan($adjustmentTimestamps[0], $ignoredAt, 'step 4 happens after adjustment 1');
+        self::assertLessThan($adjustmentTimestamps[1], $ignoredAt, 'step 4 happens before adjustment 2');
 
         self::assertSame(110_445, $view->currentValue->minor, 'current value $1,104.45');
     }

@@ -38,6 +38,8 @@ final class EventSourcedEarningLineRepository implements EarningLineRepository
     #[Override]
     public function save(EarningLine $line): void
     {
+        // Drained before the append, so a failed append leaves $line with no
+        // pending events; retrying on this same instance would write nothing.
         $events = $line->pullRecordedEvents();
 
         if ($events === []) {
