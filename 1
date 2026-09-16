@@ -1,0 +1,28 @@
+1. Approved: EventStore port + ConcurrencyConflict in Application/Port/,
+   adapters in Infrastructure. LayerDependencyTest checks both arrows.
+   Update docs.md §2/§5 accordingly.
+
+2. Commands carry primitives (string lineId, string amount, string currency,
+   string comment, string specialistId, ?int compensates). Commands are
+   messages that would arrive serialized over a transport. Handlers build
+   VOs; validation still lives in the domain.
+
+3. No. Read model must not depend on write-model shapes. Also: remove the
+   domain Adjustment class entirely — the aggregate keeps only decision
+   state (status, currency, currentValue, frozen systemValue, issued
+   AdjustmentNumbers). Comment/author/timestamp exist only in events and
+   on the read side. Create Application/Query/AdjustmentEntry (final readonly).
+
+4. Correct: untrack docs/Alcor code assignment.docx and add to .gitignore.
+   Before any push, verify with `git log --all -- "docs/*.docx"` that it was
+   never committed; if it was, stop and tell me — history must be rewritten.
+
+Additional changes:
+- All command handlers return void (CQS). AddManualAdjustmentHandler does
+  not return AdjustmentNumber; CLI reads numbers via GetEarningLineAudit.
+- In AuditHistoryProjection compute currentValue inside the event fold.
+  Use |> only if it reads more naturally than the fold; do not force it.
+- Add to Assumptions: aggregate state is minimal by design; audit details
+  live in events and the read model.
+
+Everything else in the design is approved. Proceed with Phase 1 plan.
