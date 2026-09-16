@@ -51,6 +51,11 @@ final class MoneyTest extends TestCase
         yield 'double sign' => ['--1.00'];
         yield 'sign only' => ['-'];
         yield 'out of int range' => ['99999999999999999999.00'];
+        yield 'trailing newline' => ["1.00\n"];
+        yield 'trailing carriage return' => ["1.00\r"];
+        yield 'leading newline' => ["\n1.00"];
+        yield 'trailing space' => ['1.00 '];
+        yield 'inner newline' => ["1.\n00"];
     }
 
     #[DataProvider('invalidDecimals')]

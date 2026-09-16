@@ -30,7 +30,7 @@ final readonly class Money
         $scale = $currency->minorUnits();
         $fraction = $scale > 0 ? sprintf('(?:\.(?<fraction>\d{1,%d}))?', $scale) : '';
 
-        if (preg_match('/^(?<sign>[+-])?(?<units>\d+)' . $fraction . '$/', $amount, $matches) !== 1) {
+        if (preg_match('/\A(?<sign>[+-])?(?<units>\d+)' . $fraction . '\z/', $amount, $matches) !== 1) {
             throw InvalidMoneyAmount::notDecimal($amount, $currency);
         }
 

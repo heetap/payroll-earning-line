@@ -45,6 +45,7 @@ final class EarningLineIdTest extends TestCase
         yield 'bad variant' => ['018f3a2c-5b7e-4d9a-1c1f-2e6b8a4d0f31'];
         yield 'not hexadecimal' => ['018f3a2c-5b7e-4d9a-9c1f-2e6b8a4d0fzz'];
         yield 'braced' => ['{018f3a2c-5b7e-4d9a-9c1f-2e6b8a4d0f31}'];
+        yield 'inner newline' => ["018f3a2c-5b7e-4d9a-9c1f\n-2e6b8a4d0f31"];
     }
 
     #[DataProvider('invalidIds')]
