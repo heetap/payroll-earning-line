@@ -111,8 +111,7 @@ repository port's contract).
 Value objects: `EarningLineId` (RFC 4122 UUID, validated by pattern, normalised
 to lowercase, **no `generate()`** — identity is supplied by the caller),
 `SpecialistId` (opaque, trimmed, non-empty, ≤100 chars), `Comment` (trimmed,
-non-empty, ≤500 chars), `AdjustmentNumber` (positive int, `first()`, `next()`,
-`equals()`).
+non-empty, ≤500 chars), `AdjustmentNumber` (positive int, `equals()`).
 
 **There is no `Adjustment` class in the domain.** The aggregate keeps decision
 state only — the minimum required to enforce the invariants:
@@ -168,7 +167,7 @@ No setters, no `update*`, no `remove*`, no `delete*`.
 | Zero adjustment | `addAdjustment()` | `ZeroAdjustmentNotAllowed` |
 | Cross-currency adjustment | `addAdjustment()` explicit currency check | `CurrencyMismatch` |
 | Unknown compensation target | `addAdjustment()` bounds-checks against `lastAdjustmentNumber` | `UnknownAdjustment` |
-| Freeze on first adjustment | `applyManualAdjustmentAdded()` flips `status`; no transition back exists | permanent |
+| Freeze on first adjustment | `applyAdjustmentAdded()` flips `status`; no transition back exists | permanent |
 | Calculating a line that already exists | `CalculateEarningLineHandler` checks the repository first | `EarningLineAlreadyExists` |
 
 **Currency is checked first, and explicitly.** Both `recalculate()` and
@@ -203,9 +202,12 @@ aggregate) plus `occurredAt`:
 changes, and `reconstitute()` drives the same methods, so a replayed aggregate
 cannot diverge from a live one.
 
-Dispatch is `match (true)` over `instanceof` **with no `default` arm**: an
-unhandled event type raises `\UnhandledMatchError` by itself, so there is no
-unreachable branch to leave uncovered — and `@codeCoverageIgnore` is banned.
+Dispatch is `match (true)` over `instanceof`, and PHPStan at level max requires
+a `default` arm here: it cannot prove a subject of type `true` is exhausted, and
+reports "Match expression does not handle remaining value: true" without one.
+The `default` arm throws `LogicException` and is covered by a test that passes
+an anonymous `DomainEvent` implementation — `@codeCoverageIgnore` is banned, so
+the arm must be genuinely reachable, not merely present to satisfy the analyser.
 
 `version` is the version the instance was **loaded at**. `reconstitute()`
 increments it; `record()` does not. The repository therefore appends with
