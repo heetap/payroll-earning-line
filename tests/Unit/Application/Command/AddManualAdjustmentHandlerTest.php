@@ -11,6 +11,7 @@ use Alcor\Payroll\Application\Command\CalculateEarningLineHandler;
 use Alcor\Payroll\Application\Command\RecalculateEarningLine;
 use Alcor\Payroll\Application\Command\RecalculateEarningLineHandler;
 use Alcor\Payroll\Domain\EarningLine\EarningLineId;
+use Alcor\Payroll\Domain\EarningLine\Event\ManualAdjustmentAdded;
 use Alcor\Payroll\Domain\EarningLine\Exception\InvalidComment;
 use Alcor\Payroll\Domain\EarningLine\Exception\UnknownAdjustment;
 use Alcor\Payroll\Domain\EarningLine\Exception\ZeroAdjustmentNotAllowed;
@@ -22,6 +23,8 @@ use PHPUnit\Framework\TestCase;
 
 final class AddManualAdjustmentHandlerTest extends TestCase
 {
+    private InMemoryEventStore $store;
+
     private EventSourcedEarningLineRepository $lines;
 
     private AddManualAdjustmentHandler $adjust;
@@ -30,7 +33,8 @@ final class AddManualAdjustmentHandlerTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->lines = new EventSourcedEarningLineRepository(new InMemoryEventStore());
+        $this->store = new InMemoryEventStore();
+        $this->lines = new EventSourcedEarningLineRepository($this->store);
         $clock = new FrozenClock();
         (new CalculateEarningLineHandler($this->lines, $clock))(
             new CalculateEarningLine(TestIds::LINE, '1000.00', 'USD'),
@@ -87,6 +91,11 @@ final class AddManualAdjustmentHandlerTest extends TestCase
         ));
 
         self::assertSame(100_000, $this->lines->get(new EarningLineId(TestIds::LINE))->currentValue()->minor);
+
+        $events = $this->store->load(TestIds::LINE);
+        self::assertInstanceOf(ManualAdjustmentAdded::class, $events[2]);
+        self::assertNotNull($events[2]->compensates);
+        self::assertSame(1, $events[2]->compensates->value);
     }
 
     public function test_a_correction_pointing_at_a_missing_adjustment_is_refused(): void

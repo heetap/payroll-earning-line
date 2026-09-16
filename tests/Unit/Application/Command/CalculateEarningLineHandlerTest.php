@@ -42,7 +42,7 @@ final class CalculateEarningLineHandlerTest extends TestCase
 
     public function test_it_stamps_the_event_with_the_injected_clock(): void
     {
-        $at = new DateTimeImmutable('2026-03-01T09:00:00+00:00');
+        $at = new DateTimeImmutable('2026-07-04T12:34:56+00:00');
         $handle = new CalculateEarningLineHandler($this->lines, new FrozenClock($at));
 
         $handle(new CalculateEarningLine(TestIds::LINE, '1000.00', 'USD'));
