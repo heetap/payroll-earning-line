@@ -57,16 +57,16 @@ output from an actual run — the earning line id is a fresh random UUID every
 time, everything else is deterministic:
 
 ```
-Earning line 96708fbf-280f-48cd-b441-1d557d328de6
+Earning line 63eceb59-69ca-4fc7-aa4f-49d11f12f538
 
 1. System calculates the line                                   $1,000.00
-2. System recalculates (allowed, no correction yet)              $1,050.00
-3. Adjustment -$45.55                                            $1,004.45
-4. System recalculates (ignored, line is frozen)                 $1,004.45
-5. Adjustment +$100.10                                           $1,104.55
-6. Adjustment -$0.10                                             $1,104.45
-7. Adjustment -$0.20                                             $1,104.25
-8. Adjustment +$0.20 (compensates #4)                            $1,104.45
+2. System recalculates (allowed, no correction yet)             $1,050.00
+3. Adjustment -$45.55                                           $1,004.45
+4. System recalculates (ignored, line is frozen)                $1,004.45
+5. Adjustment +$100.10                                          $1,104.55
+6. Adjustment -$0.10                                            $1,104.45
+7. Adjustment -$0.20                                            $1,104.25
+8. Adjustment +$0.20 (compensates #4)                           $1,104.45
 
 Audit history
 
@@ -80,7 +80,7 @@ Audit history
 | Adjustment 4          | -$0.20    | Second minor rounding adjustment                      |
 | Adjustment 5          | +$0.20    | Correcting mistake in adjustment #4 (compensates #4)  |
 | Recalculation ignored | $1,075.00 | attempted by the system, refused by the freeze rule   |
-| Current value         | $1,104.45 |                                                        |
+| Current value         | $1,104.45 |                                                       |
 +-----------------------+-----------+-------------------------------------------------------+
 ```
 
