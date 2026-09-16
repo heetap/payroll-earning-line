@@ -4,10 +4,15 @@ declare(strict_types=1);
 
 namespace Alcor\Payroll\Tests\Unit\Domain\EarningLine;
 
+use Alcor\Payroll\Domain\EarningLine\Comment;
 use Alcor\Payroll\Domain\EarningLine\EarningLine;
 use Alcor\Payroll\Domain\EarningLine\EarningLineId;
 use Alcor\Payroll\Domain\EarningLine\Event\EarningLineCalculated;
 use Alcor\Payroll\Domain\EarningLine\Event\EarningLineRecalculated;
+use Alcor\Payroll\Domain\EarningLine\Event\ManualAdjustmentAdded;
+use Alcor\Payroll\Domain\EarningLine\Event\SystemRecalculationIgnored;
+use Alcor\Payroll\Domain\EarningLine\Exception\ZeroAdjustmentNotAllowed;
+use Alcor\Payroll\Domain\EarningLine\SpecialistId;
 use Alcor\Payroll\Domain\Shared\Currency;
 use Alcor\Payroll\Domain\Shared\DomainEvent;
 use Alcor\Payroll\Domain\Shared\Exception\CurrencyMismatch;
@@ -127,5 +132,145 @@ final class EarningLineTest extends TestCase
         $this->expectException(LogicException::class);
 
         EarningLine::reconstitute(new EarningLineId(TestIds::LINE), [$stranger]);
+    }
+
+    public function test_an_adjustment_moves_the_current_value_by_its_signed_amount(): void
+    {
+        $line = EarningLineScenario::lineWith(
+            EarningLineScenario::calculated('1000.00'),
+            EarningLineScenario::recalculated('1050.00'),
+        );
+
+        $number = $line->addAdjustment(
+            Money::fromDecimal('-45.55', Currency::USD),
+            new Comment('Employee declined dental benefit; reversing deduction'),
+            new SpecialistId(TestIds::SPECIALIST),
+            EarningLineScenario::at(),
+        );
+
+        $events = $line->pullRecordedEvents();
+
+        self::assertSame(1, $number->value);
+        self::assertCount(1, $events);
+        self::assertInstanceOf(ManualAdjustmentAdded::class, $events[0]);
+        self::assertSame(-4_555, $events[0]->amount->minor);
+        self::assertSame(TestIds::SPECIALIST, $events[0]->by->value);
+        self::assertSame(100_445, $line->currentValue()->minor);
+    }
+
+    public function test_adjustments_are_numbered_in_sequence(): void
+    {
+        $line = EarningLineScenario::lineWith(
+            EarningLineScenario::calculated('1000.00'),
+            EarningLineScenario::adjusted(1, '-45.55'),
+            EarningLineScenario::adjusted(2, '100.10'),
+        );
+
+        $number = $line->addAdjustment(
+            Money::fromDecimal('-0.10', Currency::USD),
+            new Comment('Minor rounding adjustment'),
+            new SpecialistId(TestIds::SPECIALIST),
+            EarningLineScenario::at(),
+        );
+
+        self::assertSame(3, $number->value);
+    }
+
+    public function test_recalculation_is_ignored_once_line_has_manual_adjustment(): void
+    {
+        $line = EarningLineScenario::lineWith(
+            EarningLineScenario::calculated('1000.00'),
+            EarningLineScenario::recalculated('1050.00'),
+            EarningLineScenario::adjusted(1, '-45.55'),
+        );
+
+        $line->recalculate(Money::fromDecimal('1075.00', Currency::USD), EarningLineScenario::at());
+
+        $events = $line->pullRecordedEvents();
+
+        self::assertCount(1, $events);
+        self::assertInstanceOf(SystemRecalculationIgnored::class, $events[0]);
+        self::assertSame(107_500, $events[0]->attemptedValue->minor, 'the attempt is recorded, not applied');
+        self::assertSame(100_445, $line->currentValue()->minor, 'the value did not move');
+    }
+
+    public function test_the_freeze_survives_any_number_of_later_recalculations(): void
+    {
+        $line = EarningLineScenario::lineWith(
+            EarningLineScenario::calculated('1000.00'),
+            EarningLineScenario::adjusted(1, '10.00'),
+        );
+
+        $line->recalculate(Money::fromDecimal('5000.00', Currency::USD), EarningLineScenario::at());
+        $line->recalculate(Money::fromDecimal('9000.00', Currency::USD), EarningLineScenario::at());
+
+        self::assertCount(2, $line->pullRecordedEvents());
+        self::assertSame(101_000, $line->currentValue()->minor);
+    }
+
+    public function test_an_ignored_recalculation_is_recorded_even_when_the_value_would_not_change(): void
+    {
+        $line = EarningLineScenario::lineWith(
+            EarningLineScenario::calculated('1050.00'),
+            EarningLineScenario::adjusted(1, '-45.55'),
+        );
+
+        $line->recalculate(Money::fromDecimal('1050.00', Currency::USD), EarningLineScenario::at());
+
+        self::assertCount(1, $line->pullRecordedEvents(), 'the refusal itself is the audit fact');
+    }
+
+    public function test_a_frozen_line_still_refuses_a_foreign_currency(): void
+    {
+        $line = EarningLineScenario::lineWith(
+            EarningLineScenario::calculated('1000.00'),
+            EarningLineScenario::adjusted(1, '10.00'),
+        );
+
+        $this->expectException(CurrencyMismatch::class);
+
+        $line->recalculate(Money::fromDecimal('1050.00', Currency::EUR), EarningLineScenario::at());
+    }
+
+    public function test_an_adjustment_must_change_something(): void
+    {
+        $line = EarningLineScenario::lineWith(EarningLineScenario::calculated('1000.00'));
+
+        $this->expectException(ZeroAdjustmentNotAllowed::class);
+
+        $line->addAdjustment(
+            Money::zero(Currency::USD),
+            new Comment('no-op'),
+            new SpecialistId(TestIds::SPECIALIST),
+            EarningLineScenario::at(),
+        );
+    }
+
+    public function test_an_adjustment_must_be_in_the_lines_currency(): void
+    {
+        $line = EarningLineScenario::lineWith(EarningLineScenario::calculated('1000.00'));
+
+        $this->expectException(CurrencyMismatch::class);
+
+        $line->addAdjustment(
+            Money::fromDecimal('10.00', Currency::EUR),
+            new Comment('wrong currency'),
+            new SpecialistId(TestIds::SPECIALIST),
+            EarningLineScenario::at(),
+        );
+    }
+
+    public function test_a_line_may_go_negative_because_no_rule_forbids_it(): void
+    {
+        $line = EarningLineScenario::lineWith(EarningLineScenario::calculated('10.00'));
+
+        $line->addAdjustment(
+            Money::fromDecimal('-50.00', Currency::USD),
+            new Comment('Clawback of an overpayment'),
+            new SpecialistId(TestIds::SPECIALIST),
+            EarningLineScenario::at(),
+        );
+
+        self::assertSame(-4_000, $line->currentValue()->minor);
     }
 }

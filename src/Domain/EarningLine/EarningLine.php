@@ -6,6 +6,9 @@ namespace Alcor\Payroll\Domain\EarningLine;
 
 use Alcor\Payroll\Domain\EarningLine\Event\EarningLineCalculated;
 use Alcor\Payroll\Domain\EarningLine\Event\EarningLineRecalculated;
+use Alcor\Payroll\Domain\EarningLine\Event\ManualAdjustmentAdded;
+use Alcor\Payroll\Domain\EarningLine\Event\SystemRecalculationIgnored;
+use Alcor\Payroll\Domain\EarningLine\Exception\ZeroAdjustmentNotAllowed;
 use Alcor\Payroll\Domain\Shared\Currency;
 use Alcor\Payroll\Domain\Shared\DomainEvent;
 use Alcor\Payroll\Domain\Shared\Exception\CurrencyMismatch;
@@ -24,6 +27,10 @@ final class EarningLine
     private Money $systemValue;
 
     private Money $currentValue;
+
+    private LineStatus $status = LineStatus::SystemCalculated;
+
+    private int $lastAdjustmentNumber = 0;
 
     /** The version this instance was loaded at; pending events do not advance it. */
     private int $version = 0;
@@ -55,11 +62,38 @@ final class EarningLine
     {
         $this->assertSameCurrency($newSystemValue);
 
+        // Refusing is itself a fact worth auditing: it shows the drift between
+        // what the system would pay and what the specialist decided.
+        if ($this->status === LineStatus::ManuallyAdjusted) {
+            $this->record(new SystemRecalculationIgnored($this->id, $newSystemValue, $at));
+
+            return;
+        }
+
         if ($newSystemValue->equals($this->systemValue)) {
             return;
         }
 
         $this->record(new EarningLineRecalculated($this->id, $newSystemValue, $at));
+    }
+
+    public function addAdjustment(
+        Money $amount,
+        Comment $comment,
+        SpecialistId $by,
+        DateTimeImmutable $at,
+    ): AdjustmentNumber {
+        $this->assertSameCurrency($amount);
+
+        if ($amount->isZero()) {
+            throw ZeroAdjustmentNotAllowed::forLine($this->id);
+        }
+
+        $number = new AdjustmentNumber($this->lastAdjustmentNumber + 1);
+
+        $this->record(new ManualAdjustmentAdded($this->id, $number, $amount, $comment, $by, $at));
+
+        return $number;
     }
 
     public function id(): EarningLineId
@@ -99,6 +133,8 @@ final class EarningLine
         match (true) {
             $event instanceof EarningLineCalculated => $this->applyCalculated($event),
             $event instanceof EarningLineRecalculated => $this->applyRecalculated($event),
+            $event instanceof ManualAdjustmentAdded => $this->applyAdjustmentAdded($event),
+            $event instanceof SystemRecalculationIgnored => null,
             default => throw new LogicException(sprintf('Unhandled event %s.', $event::class)),
         };
     }
@@ -114,6 +150,13 @@ final class EarningLine
     {
         $this->systemValue = $event->newSystemValue;
         $this->currentValue = $event->newSystemValue;
+    }
+
+    private function applyAdjustmentAdded(ManualAdjustmentAdded $event): void
+    {
+        $this->status = LineStatus::ManuallyAdjusted;
+        $this->currentValue = $this->currentValue->add($event->amount);
+        $this->lastAdjustmentNumber = $event->number->value;
     }
 
     private function assertSameCurrency(Money $amount): void
