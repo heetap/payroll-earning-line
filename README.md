@@ -136,6 +136,26 @@ transport; handlers build the value objects at the edge and return `void`.
 The aggregate's `AdjustmentNumber` is never read by the CLI — only
 observable through the audit query `AuditTableRenderer` prints.
 
+## Why event sourcing, and why a simpler model would also be fair
+
+The brief lets the candidate choose, so here is the reasoning rather than a
+preference. Two of the six rules are awkward in a CRUD model and fall out of an
+event stream for free.
+
+*"No correction may ever be edited or deleted"* is the definition of an
+append-only log. Stored as rows, it depends on every future write site
+remembering not to `UPDATE`; stored as events, there is no operation that
+could. *"Recalculation must never move a corrected line again"* would be a
+boolean column that every writer must check; as events it is a status with no
+transition back, and the refused attempts are themselves recorded.
+
+The cost is real: a projection and a store to maintain, a read model that is a
+second fold over the same events and can drift from the aggregate, and more
+moving parts than the problem strictly demands. A plain object model with an
+append-only `adjustments` table and a `frozen` flag would satisfy all six rules
+and be smaller. It would put the guarantees in discipline rather than in
+structure — which is the trade I made, not a law.
+
 ## How each business rule is enforced
 
 Every test name below was checked against
@@ -207,6 +227,12 @@ privilege for the application's database role.
 objects to storable scalars without re-applying today's validation to
 yesterday's data — an old comment must still load if a length limit later
 changes.
+
+**`version()` is the version an instance was loaded at**, so it is stale after
+`save()`. Every handler reloads, so this never bites today. Related, and worth
+knowing before adding a retry: `save()` drains the aggregate's pending events
+*before* it appends them, so a failed append leaves the instance empty — a
+retry must reload the line rather than re-saving the same object.
 
 **Left for later:** snapshots, once replay-per-read is a real cost;
 payroll-period close and what happens to a line once its period closes;
