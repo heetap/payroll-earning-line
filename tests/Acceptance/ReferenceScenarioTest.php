@@ -22,7 +22,7 @@ use DateTimeImmutable;
 use PHPUnit\Framework\TestCase;
 
 /**
- * The worked example from the brief, replayed through the application layer.
+ * The worked example from the requirements, replayed through the application layer.
  * Its expectations are the contract with the business and are never adjusted
  * to accommodate the code.
  */

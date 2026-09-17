@@ -2,11 +2,10 @@
 
 Instructions for AI coding agents working in this repository.
 
-The requirements this project implements live in `docs/superpowers/specs/` (the design of
-record) and `docs/superpowers/plans/` (the task-by-task plan). Read the spec before any
-task that touches the domain.
+The requirements this project implements live in `docs/superpowers/specs/` — the design
+of record. Read it before any task that touches the domain.
 
-There is also a local, **untracked** brief at `docs/docs.md`. It is the repository owner's
+There is also a local, **untracked** instruction file at `docs/docs.md`. It is the owner's
 own instruction file and is deliberately kept out of version control, so it will not exist
 in a fresh clone. When it is present it outranks this file; when this file and the spec
 conflict, the spec wins. **Point out the conflict rather than silently picking a side.**

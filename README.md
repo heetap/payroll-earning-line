@@ -138,9 +138,9 @@ observable through the audit query `AuditTableRenderer` prints.
 
 ## Why event sourcing, and why a simpler model would also be fair
 
-The brief lets the candidate choose, so here is the reasoning rather than a
-preference. Two of the six rules are awkward in a CRUD model and fall out of an
-event stream for free.
+Either approach would serve these requirements, so here is the reasoning rather
+than a preference. Two of the six rules are awkward in a CRUD model and fall out
+of an event stream for free.
 
 *"No correction may ever be edited or deleted"* is the definition of an
 append-only log. Stored as rows, it depends on every future write site
@@ -177,7 +177,7 @@ Every test name below was checked against
 | Calculating a line that already exists is refused as a duplicate, distinct from a genuine concurrency race | `CalculateEarningLineHandler` checks `EarningLineRepository::exists()` before appending | `CalculateEarningLineHandlerTest::test_calculating_the_same_line_twice_is_refused_as_a_duplicate` |
 | The current value is available at any time without replaying by hand | `EarningLine::currentValue()`, `AuditHistoryView::$currentValue` | `EarningLineTest::test_an_adjustment_moves_the_current_value_by_its_signed_amount`, `AuditHistoryProjectionTest::test_it_reports_every_correction_in_the_order_they_were_made` |
 | The full audit history is available at any time, including ignored recalculations, kept apart from the adjustment list | `AuditHistoryProjection`, `AuditHistoryView` | `AuditHistoryProjectionTest::test_nothing_is_frozen_before_the_first_correction`, `AuditHistoryProjectionTest::test_the_first_correction_freezes_the_system_value`, `AuditHistoryProjectionTest::test_ignored_recalculations_are_not_part_of_the_adjustment_history` |
-| The whole scenario from the brief produces the expected numbers and the expected audit view, end to end | `bin/scenario.php`, the application layer as a whole | `ReferenceScenarioTest::test_the_reference_scenario_produces_the_expected_numbers`, `ReferenceScenarioTest::test_the_reference_scenario_produces_the_expected_audit_history` |
+| The worked example from the requirements produces the expected numbers and the expected audit view, end to end | `bin/scenario.php`, the application layer as a whole | `ReferenceScenarioTest::test_the_reference_scenario_produces_the_expected_numbers`, `ReferenceScenarioTest::test_the_reference_scenario_produces_the_expected_audit_history` |
 
 ## Assumptions
 
@@ -202,15 +202,15 @@ Every test name below was checked against
     no format is assumed.
 12. Supported currencies are USD/EUR/GBP. Precision is asked of the currency so
     0- or 3-decimal currencies can be added later.
-13. The brief gives no attempted value for the ignored recalculation at step 4 —
+13. The requirements give no attempted value for the ignored recalculation at step 4 —
     only that the line's value must not move. The scenario and the acceptance
     test use `1075.00`, chosen to differ from the frozen `1050.00` so that the
     test would fail if the value were silently adopted.
 14. The audit history reports the frozen system value, the corrections and the
     current value — not the accepted recalculations that preceded the first
-    correction. This matches the expected audit history in the assignment
-    brief exactly. Refused recalculations *are* reported, which is more than
-    the brief asks for, because the difference between what the system would
+    correction. This matches the expected audit history in the requirements
+    exactly. Refused recalculations *are* reported, which is more than the
+    requirements ask for, because the difference between what the system would
     pay and what the specialist decided is worth seeing.
 15. An earning line carries no employee, payroll period or earning-type
     reference. None of the six business rules needs one, and adding them
@@ -245,10 +245,10 @@ today only in the audit history; and idempotency keys, so a retried
 Built with Claude Code end to end: a design document was written and
 reviewed *before any code was written*
 (`docs/superpowers/specs/2026-09-16-earning-line-adjustments-design.md`),
-then a task-by-task plan (`docs/superpowers/plans/`), both committed
-alongside the code. Each task was implemented test-first and reviewed by a
-separate reviewer before the next began — two findings touch code a
-reviewer will see here: the audit table's missing leading `+` on positive
+then a task-by-task plan, and the design document is committed alongside
+the code. Each task was implemented test-first and reviewed by a
+separate reviewer before the next began — two findings touch code visible
+here: the audit table's missing leading `+` on positive
 corrections (`AuditTableRenderer`), and a compensation-link test that
 asserted only the balance instead of the recorded `compensates` field.
-`git log` is part of the answer: small, green commits, each explaining why.
+`git log` is part of the record: small, green commits, each explaining why.

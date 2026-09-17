@@ -3,7 +3,7 @@
 **Date:** 2026-09-16
 **Status:** approved
 **Requirements source:** `docs/docs.md` (agent instruction file) and the Alcor
-coding-test brief. Both are untracked inputs; this document is the design of
+source requirements. Both are untracked inputs; this document is the design of
 record.
 
 ## 1. Problem
@@ -41,7 +41,7 @@ adjusted without ever being recalculated freezes at its originally calculated
 value. Later recalculations are recorded as `SystemRecalculationIgnored` and
 change nothing.
 
-A plain OO model would also satisfy the brief and would be a defensible answer.
+A plain OO model would also satisfy these rules and would be a defensible answer.
 The README will say so explicitly and give the trade-off: event sourcing costs
 a projection and a store, and buys an audit trail that cannot be forged.
 
@@ -389,7 +389,7 @@ Maintained here during implementation, then published in `README.md`.
     no format is assumed.
 12. Supported currencies are USD/EUR/GBP. Precision is asked of the currency so
     0- or 3-decimal currencies can be added later.
-13. The brief gives no attempted value for the ignored recalculation at step 4 —
+13. The requirements give no attempted value for the ignored recalculation at step 4 —
     only that the line's value must not move. The scenario and the acceptance
     test use `1075.00`, chosen to differ from the frozen `1050.00` so that the
     test would fail if the value were silently adopted.
