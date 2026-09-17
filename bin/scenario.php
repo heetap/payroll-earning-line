@@ -39,16 +39,16 @@ $specialist = 'specialist-alice';
 
 $step = static function (string $description) use ($audit, $money, $lineId): void {
     $value = $audit(new GetEarningLineAudit($lineId))->currentValue;
-    printf("%-58s %14s\n", $description, $money->format($value));
+    printf("%-76s %14s\n", $description, $money->format($value));
 };
 
 echo "Earning line {$lineId}\n\n";
 
 $calculate(new CalculateEarningLine($lineId, '1000.00', 'USD'));
-$step('1. System calculates the line');
+$step('Step 1  System calculates the line');
 
 $recalculate(new RecalculateEarningLine($lineId, '1050.00', 'USD'));
-$step('2. System recalculates (allowed, no correction yet)');
+$step('Step 2  System recalculates (allowed, no correction yet)');
 
 $adjust(new AddManualAdjustment(
     $lineId,
@@ -57,10 +57,10 @@ $adjust(new AddManualAdjustment(
     'Employee declined dental benefit; reversing deduction',
     $specialist,
 ));
-$step('3. Adjustment -$45.55');
+$step('Step 3  Adjustment #1  -$45.55');
 
 $recalculate(new RecalculateEarningLine($lineId, '1075.00', 'USD'));
-$step('4. System recalculates (ignored, line is frozen)');
+$step('Step 4  System recalculates (ignored, line is frozen)');
 
 $adjust(new AddManualAdjustment(
     $lineId,
@@ -69,13 +69,13 @@ $adjust(new AddManualAdjustment(
     'Late correction: missed approved overtime bonus',
     $specialist,
 ));
-$step('5. Adjustment +$100.10');
+$step('Step 5  Adjustment #2  +$100.10');
 
 $adjust(new AddManualAdjustment($lineId, '-0.10', 'USD', 'Minor rounding adjustment', $specialist));
-$step('6. Adjustment -$0.10');
+$step('Step 6  Adjustment #3  -$0.10');
 
 $adjust(new AddManualAdjustment($lineId, '-0.20', 'USD', 'Second minor rounding adjustment', $specialist));
-$step('7. Adjustment -$0.20');
+$step('Step 7  Adjustment #4  -$0.20');
 
 $adjust(new AddManualAdjustment(
     $lineId,
@@ -85,7 +85,7 @@ $adjust(new AddManualAdjustment(
     $specialist,
     4,
 ));
-$step('8. Adjustment +$0.20 (compensates #4)');
+$step('Step 8  Adjustment #5  +$0.20  (compensates adjustment #4, made at step 7)');
 
 echo "\nAudit history\n\n";
 echo $table->render($audit(new GetEarningLineAudit($lineId)));
