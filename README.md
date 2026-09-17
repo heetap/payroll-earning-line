@@ -1,29 +1,11 @@
 # Manual Adjustments to an Earning Line
 
-Proof of concept for the Alcor OS payroll platform: an event-sourced domain model
-for a payroll earning line that the system calculates automatically and that a
-payroll specialist may correct manually, permanently and traceably.
-
-## Table of contents
-
-1. [What this is](#what-this-is)
-2. [Layout](#layout)
-3. [How to run](#how-to-run)
-4. [Domain model](#domain-model)
-5. [Why event sourcing](#why-event-sourcing)
-6. [How each business rule is enforced](#how-each-business-rule-is-enforced)
-7. [Assumptions](#assumptions)
-8. [Trade-offs and what I would do next](#trade-offs-and-what-i-would-do-next)
-9. [How AI was used](#how-ai-was-used)
-
-## What this is
-
-An event-sourced domain model for manual corrections to a payroll earning
-line: the system calculates a line automatically, and a payroll specialist may
-correct it with a signed amount and a mandatory comment, in a way that can
-never be edited or deleted and that, once applied, permanently stops the
-system from moving the line's value again. It is a library plus one CLI
-script (`bin/scenario.php`) — no framework, no database, no UI.
+An event-sourced domain model for a payroll earning line: the system
+calculates it automatically, and a specialist may correct it with a signed
+amount and a mandatory comment that can never be edited or deleted and
+that, once applied, permanently stops the system from moving the line's
+value. A library plus one CLI script (`bin/scenario.php`) — no framework,
+no database, no UI.
 
 ## Layout
 
@@ -53,16 +35,13 @@ tests/                     Unit / Integration / Acceptance / Architecture / Supp
 
 Three placements are deliberate rather than habitual:
 
-- **`Exception/` sits next to whatever throws it**, so the failures a class can
-  produce are one directory away from the class, not in a distant error package.
-- **A command and its handler live together.** They change together — a new
-  field on one is a new line in the other — and splitting them by technical kind
-  would put every edit in two folders.
-- **`Port/` is inside `Application`, not `Infrastructure`.** The read side folds
-  the raw event stream without loading the aggregate, so it needs the store; had
-  the port lived in `Infrastructure`, `Application` would depend on it and the
-  layering rule would break at the first query handler. `tests/Architecture`
-  fails the build if either arrow is ever reversed.
+- **`Exception/` sits next to whatever throws it.**
+- **A command and its handler live together**, since they change together.
+- **`Port/` is inside `Application`, not `Infrastructure`.**
+  `GetEarningLineAuditHandler` needs the `EventStore` directly, to fold the
+  event stream without loading the aggregate. `tests/Architecture` fails the
+  build if `Domain` references `Application`/`Infrastructure`, or
+  `Application` references `Infrastructure`.
 
 ## How to run
 
@@ -74,19 +53,17 @@ composer check     # coding standards + PHPStan (level max) + PHPUnit
 composer scenario  # prints the reference scenario step by step
 ```
 
-Without a local PHP 8.5, build the image and run everything inside it — this
-is the path a reviewer without PHP 8.5 should take:
+Without a local PHP 8.5, build the image and run everything inside it:
 
 ```bash
 docker build -t alcor . && docker run --rm alcor composer check
 docker run --rm alcor composer scenario
 ```
 
-During development, `docker-compose.yml` bind-mounts the working tree into a
-container built on PHP 8.5, so every tool runs against that PHP version
-regardless of what the host has. Dependencies are installed inside the
-container too — a host without PHP 8.5 cannot satisfy `composer.json`'s
-`"php": "^8.5"` constraint to produce `vendor/` itself:
+Or use `docker-compose.yml`, which bind-mounts the working tree into a PHP
+8.5 container. `composer install` must also run inside it — a host without
+PHP 8.5 can't satisfy `composer.json`'s `"php": "^8.5"` to produce `vendor/`
+itself:
 
 ```bash
 docker compose run --rm php composer install
@@ -94,10 +71,9 @@ docker compose run --rm php composer check
 docker compose run --rm php composer scenario
 ```
 
-`composer scenario` runs the eight-step reference scenario end to end through
-the application layer and prints the resulting audit table. This is real
-output from an actual run — the earning line id is a fresh random UUID every
-time, everything else is deterministic:
+`composer scenario` runs the eight-step reference scenario end to end and
+prints the audit table — real output; only the earning line id (a fresh
+random UUID) varies between runs:
 
 ```
 Earning line a3def6c7-5736-4a82-a60a-7d99ab3351fb
@@ -130,16 +106,13 @@ Audit history
 ## Domain model
 
 An `EarningLine` aggregate is reconstructed by folding its event stream.
-State only ever changes by applying a past-tense domain event — `record()`
-calls the same `apply()` that `reconstitute()` drives when replaying a
-stream — so a replayed line cannot diverge from one that lived through its
-events. The read model (`AuditHistoryProjection`) is a second, independently
-maintained fold over the same events; nothing but the acceptance test keeps
-it honest against `EarningLine::apply()`. Once a line has taken its first
-manual adjustment it moves to `ManuallyAdjusted` and never leaves — every
-later same-currency recalculation is recorded as an ignored attempt, not
-silently applied and not an error; a foreign-currency recalculation is
-refused with an exception instead, in either status.
+State changes only by applying an event — `record()` calls the same
+`apply()` that `reconstitute()` drives on replay, so a replay cannot
+diverge from a live line. `AuditHistoryProjection` is a second, independent
+fold over the same events, kept honest only by the acceptance test. The
+first adjustment moves a line to `ManuallyAdjusted` permanently: later
+same-currency recalculations are ignored; foreign-currency ones throw, in
+either status.
 
 ```mermaid
 stateDiagram-v2
@@ -155,62 +128,13 @@ stateDiagram-v2
     end note
 ```
 
-The aggregate keeps decision state only — id, currency, system value,
-current value, status, the last issued adjustment number, and the stream
-version. **There is no `Adjustment` class in the domain.** Comments,
-authors and timestamps are facts about the past; they live in the events and
-in the read model, never in a mutable in-memory object. This is what makes
-"a correction can never be edited" structural rather than a convention: there
-is no object holding a comment that any code path could reassign. Adjustment
-numbers are sequential from 1, so the set of numbers ever issued is exactly
-`1..lastAdjustmentNumber` — nothing else needs to be stored to validate that
-a compensation target exists.
-
-The write side (`EarningLine` and its handlers) and the read side
-(`AuditHistoryProjection` → `AuditHistoryView`) are separate: the audit query
-loads the raw event stream from the `EventStore` and folds it directly,
-without ever constructing the aggregate. This is also why the `EventStore`
-port lives in `Application/Port/` rather than `Infrastructure/Persistence/`
-as the original instruction file specified: the read side needs the store
-directly, and a port sitting in `Infrastructure` would have forced
-`Application` to depend on `Infrastructure`, breaking the inward-only
-dependency rule at the very first query handler.
-
-Commands (`CalculateEarningLine`, `RecalculateEarningLine`,
-`AddManualAdjustment`) carry primitives — strings and an optional int — not
-value objects, because a command is a message that would arrive serialized
-over a transport in a real system; handlers build the value objects, so
-invalid input is rejected by the domain itself, at the edge of the
-application. Handlers return `void` (command-query separation); the
-aggregate still returns the assigned `AdjustmentNumber` internally, but that
-value is not read anywhere in the CLI. The assigned number becomes
-observable through the audit query instead: `GetEarningLineAuditHandler`
-folds the event stream into an `AuditHistoryView`, and `AuditTableRenderer`
-is where each adjustment's number reaches the printed table.
-
-## Why event sourcing
-
-The requirement "no correction may ever be edited or deleted" is the
-definition of an append-only event stream. Modelling it as one makes the rule
-structural rather than declarative: there is no code path that could mutate a
-past correction, because past corrections are not stored as mutable rows.
-
-The permanent freeze on recalculation is the second reason. A CRUD model
-would store a `system_value` column that recalculation overwrites, and the
-freeze would depend on remembering to check a flag at every write site. As an
-event stream, the frozen value is simply the latest system value in effect
-when the first `ManualAdjustmentAdded` is recorded, carried forward by
-whichever of `EarningLineCalculated` or `EarningLineRecalculated` came last —
-so a line adjusted without ever being recalculated freezes at its originally
-calculated value. Later recalculations are recorded as
-`SystemRecalculationIgnored` and change nothing.
-
-A plain OO model — a mutable `EarningLine` row plus an append-only
-`adjustments` table and a boolean "frozen" flag — would also be a valid
-answer to this brief, and would be simpler to build. The trade-off: event
-sourcing costs a projection and a store on top of the domain model; it buys
-an audit trail that cannot be forged, because forging it would require
-rewriting history rather than flipping a column.
+There is no `Adjustment` class — comments, authors and timestamps live only
+in events and the read model, making "never edited" structural. Adjustment
+numbers run `1..lastAdjustmentNumber`. Commands carry primitives, not value
+objects, since they are messages that would arrive serialized over a
+transport; handlers build the value objects at the edge and return `void`.
+The aggregate's `AdjustmentNumber` is never read by the CLI — only
+observable through the audit query `AuditTableRenderer` prints.
 
 ## How each business rule is enforced
 
@@ -245,8 +169,8 @@ Every test name below was checked against
    is the only way to create a new line (`reconstitute()` is a second public
    factory, but it replays an existing stream rather than starting one).
 4. Recalculation with an unchanged value records nothing.
-5. Ignored recalculations are recorded for drift visibility but are not part
-   of the adjustment history.
+5. Ignored recalculations are recorded so a recalculation the freeze
+   suppressed stays visible, but they are not part of the adjustment history.
 6. Compensation is a link, not an enforced equal-and-opposite amount.
 7. A line value may become negative; no business rule forbids it.
 8. Every adjustment records who made it and when.
@@ -266,93 +190,39 @@ Every test name below was checked against
     current value — not the accepted recalculations that preceded the first
     correction. This matches the expected audit history in the assignment
     brief exactly. Refused recalculations *are* reported, which is more than
-    the brief asks for, because the drift between what the system would pay
-    and what the specialist decided is worth seeing.
+    the brief asks for, because the difference between what the system would
+    pay and what the specialist decided is worth seeing.
 15. An earning line carries no employee, payroll period or earning-type
     reference. None of the six business rules needs one, and adding them
     would model a payroll system rather than the rule under test.
 
 ## Trade-offs and what I would do next
 
-**Persistence.** The only `EventStore` implementation is in-memory
-(`InMemoryEventStore`); nothing survives the process. A SQL-backed store
-would be the first real step, and it would enforce append-only at the
-database rather than trusting application code: a unique constraint on
-`(stream_id, version)` makes a concurrent overwrite fail as a constraint
-violation, and the application's database role would simply have no
-`UPDATE` or `DELETE` privilege on the events table, so "corrections are never
-edited or deleted" would hold even against a bug or a rogue script.
+**Persistence.** Events live only in memory. A SQL-backed store would come
+next, enforcing append-only at the database itself: a unique constraint on
+`(stream_id, version)`, and an events table with no `UPDATE`/`DELETE`
+privilege for the application's database role.
 
-**Serialization is out of scope** with an in-memory store, and it is not
-free. Once events are persisted, an infrastructure serializer has to map
-value objects (`Money`, `EarningLineId`, `Comment`, ...) to storable scalars
-and back. Deserializing historical events must not silently re-apply
-today's validation rules — a comment that was valid under yesterday's 500
-character limit must still load if that limit changes tomorrow. That needs a
-dedicated reconstruction path (or upcasters translating an old event shape
-into the current one) that is deliberately looser than the constructors used
-to create new events.
+**Serialization is out of scope.** A future serializer must map value
+objects to storable scalars without re-applying today's validation to
+yesterday's data — an old comment must still load if a length limit later
+changes.
 
-**`version()` reports the version the instance was loaded at**, not the
-version after any pending, unsaved events — so it goes stale immediately
-after `save()`. This never bites in practice because every command handler
-loads a fresh aggregate, uses it once, and discards it, but it is a sharp
-edge for any future code that keeps an aggregate instance around across
-multiple saves. `save()` also drains the aggregate's pending events before
-appending them, so a failed append leaves the instance empty — a retry on
-that same instance would write nothing; a retry must reload.
-
-**Left for later, in roughly the order I'd tackle them:**
-
-- Snapshots, once streams are long enough that replay-per-read is a real
-  cost — not needed yet: reconstruction is a single pass over a short list.
-- Payroll-period close, which would need its own rule for what happens to a
-  line (and its corrections) once the period it belongs to is closed.
-- Drift notifications to specialists when a `SystemRecalculationIgnored` is
-  recorded — right now it is only visible by reading the audit history.
-- Idempotency keys on commands, so a retried `AddManualAdjustment` after a
-  timeout cannot double-apply a correction the specialist believes failed.
+**Left for later:** snapshots, once replay-per-read is a real cost;
+payroll-period close and what happens to a line once its period closes;
+notifications when a `SystemRecalculationIgnored` is recorded, visible
+today only in the audit history; and idempotency keys, so a retried
+`AddManualAdjustment` can't double-apply.
 
 ## How AI was used
 
-The assignment was built with Claude Code end to end, and the process is
-part of what is being submitted, not just the code it produced:
-
-1. The requirements were fixed first, in an instruction file kept out of
-   version control (`docs/docs.md`, referenced but not committed, per the
-   assignment's own instructions).
-2. A design document was written and reviewed *before any code was
-   written* — `docs/superpowers/specs/2026-09-16-earning-line-adjustments-design.md`
-   — followed by a task-by-task implementation plan under
-   `docs/superpowers/plans/`. Both are committed, so the reasoning behind the
-   code is auditable, not just the result.
-3. Each task was implemented test-first (failing test, minimal code,
-   refactor) and reviewed against its own brief by a separate reviewer
-   before the next task began. The reviews caught real defects, not just
-   style:
-   - `Money::fromDecimal` accepted `"1.00\n"` while correctly rejecting
-     `" 1.00"`, because the parsing regex anchored with `$`, which in PCRE
-     matches before a trailing newline. Fixed by anchoring with `\A`/`\z`
-     instead (see `src/Domain/Shared/Money.php`).
-   - The audit table printed positive corrections without their leading
-     `+`, contradicting both the brief's expected output and the scenario's
-     own narration of each step. Fixed in `AuditTableRenderer`, not in
-     `MoneyFormatter`, because `MoneyFormatter` also renders absolute values
-     (the system value, the current value) where a leading `+` would be
-     wrong.
-   - `AddManualAdjustmentHandlerTest::test_it_links_a_correction_to_the_adjustment_it_fixes`
-     asserted only the resulting balance, which is identical with or without
-     the compensation link actually being recorded. Rewritten to assert on
-     the recorded `ManualAdjustmentAdded` event's `compensates` field
-     instead.
-4. `AGENTS.md` at the repository root records the conventions that emerged
-   along the way, including two found by experiment rather than by reading
-   documentation: PHPStan at level max rejects `match (true)` over
-   `instanceof` checks unless it has a `default` arm (unlike `match` over an
-   enum, where a `default` is the thing that gets rejected), and discarding
-   a `#[\NoDiscard]` return raises a warning that this project's PHPUnit
-   configuration (`failOnWarning`) turns into a test failure, so a
-   deliberate discard has to be written as `(void)`.
-5. `git log` is part of the answer: the commit sequence is small, each
-   commit is green, and each message explains why the change was made, not
-   just what changed.
+Built with Claude Code end to end: a design document was written and
+reviewed *before any code was written*
+(`docs/superpowers/specs/2026-09-16-earning-line-adjustments-design.md`),
+then a task-by-task plan (`docs/superpowers/plans/`), both committed
+alongside the code. Each task was implemented test-first and reviewed by a
+separate reviewer before the next began — two findings touch code a
+reviewer will see here: the audit table's missing leading `+` on positive
+corrections (`AuditTableRenderer`), and a compensation-link test that
+asserted only the balance instead of the recorded `compensates` field.
+`git log` is part of the answer: small, green commits, each explaining why.
