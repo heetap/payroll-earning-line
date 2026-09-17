@@ -82,11 +82,14 @@ docker build -t alcor . && docker run --rm alcor composer check
 docker run --rm alcor composer scenario
 ```
 
-During development, `docker-compose.yml` bind-mounts the working tree over a
-`vendor/` installed once on the host, so the toolchain always runs against
-PHP 8.5 regardless of what the host has:
+During development, `docker-compose.yml` bind-mounts the working tree into a
+container built on PHP 8.5, so every tool runs against that PHP version
+regardless of what the host has. Dependencies are installed inside the
+container too — a host without PHP 8.5 cannot satisfy `composer.json`'s
+`"php": "^8.5"` constraint to produce `vendor/` itself:
 
 ```bash
+docker compose run --rm php composer install
 docker compose run --rm php composer check
 docker compose run --rm php composer scenario
 ```
@@ -97,16 +100,16 @@ output from an actual run — the earning line id is a fresh random UUID every
 time, everything else is deterministic:
 
 ```
-Earning line 63eceb59-69ca-4fc7-aa4f-49d11f12f538
+Earning line a3def6c7-5736-4a82-a60a-7d99ab3351fb
 
-1. System calculates the line                                   $1,000.00
-2. System recalculates (allowed, no correction yet)             $1,050.00
-3. Adjustment -$45.55                                           $1,004.45
-4. System recalculates (ignored, line is frozen)                $1,004.45
-5. Adjustment +$100.10                                          $1,104.55
-6. Adjustment -$0.10                                            $1,104.45
-7. Adjustment -$0.20                                            $1,104.25
-8. Adjustment +$0.20 (compensates #4)                           $1,104.45
+Step 1  System calculates the line                                                $1,000.00
+Step 2  System recalculates (allowed, no correction yet)                          $1,050.00
+Step 3  Adjustment #1  -$45.55                                                    $1,004.45
+Step 4  System recalculates (ignored, line is frozen)                             $1,004.45
+Step 5  Adjustment #2  +$100.10                                                   $1,104.55
+Step 6  Adjustment #3  -$0.10                                                     $1,104.45
+Step 7  Adjustment #4  -$0.20                                                     $1,104.25
+Step 8  Adjustment #5  +$0.20  (compensates adjustment #4, made at step 7)        $1,104.45
 
 Audit history
 
@@ -127,11 +130,16 @@ Audit history
 ## Domain model
 
 An `EarningLine` aggregate is reconstructed by folding its event stream.
-Every state change is recorded as a past-tense domain event before it is
-applied to in-memory state, so the write model, the read model and a fresh
-replay can never disagree. Once a line has taken its first manual adjustment
-it moves to `ManuallyAdjusted` and never leaves — every later recalculation
-is recorded as an ignored attempt, not silently applied and not an error.
+State only ever changes by applying a past-tense domain event — `record()`
+calls the same `apply()` that `reconstitute()` drives when replaying a
+stream — so a replayed line cannot diverge from one that lived through its
+events. The read model (`AuditHistoryProjection`) is a second, independently
+maintained fold over the same events; nothing but the acceptance test keeps
+it honest against `EarningLine::apply()`. Once a line has taken its first
+manual adjustment it moves to `ManuallyAdjusted` and never leaves — every
+later same-currency recalculation is recorded as an ignored attempt, not
+silently applied and not an error; a foreign-currency recalculation is
+refused with an exception instead, in either status.
 
 ```mermaid
 stateDiagram-v2
@@ -174,9 +182,11 @@ value objects, because a command is a message that would arrive serialized
 over a transport in a real system; handlers build the value objects, so
 invalid input is rejected by the domain itself, at the edge of the
 application. Handlers return `void` (command-query separation); the
-aggregate still returns the assigned `AdjustmentNumber` internally, and the
-CLI recovers adjustment numbers by reading them back through the audit
-query rather than through a command's return value.
+aggregate still returns the assigned `AdjustmentNumber` internally, but that
+value is not read anywhere in the CLI. The assigned number becomes
+observable through the audit query instead: `GetEarningLineAuditHandler`
+folds the event stream into an `AuditHistoryView`, and `AuditTableRenderer`
+is where each adjustment's number reaches the printed table.
 
 ## Why event sourcing
 
@@ -214,11 +224,12 @@ Every test name below was checked against
 | Recalculation to an unchanged value, before any adjustment, records nothing | `EarningLine::recalculate()` value comparison | `EarningLineTest::test_recalculating_to_the_same_value_records_nothing` |
 | Recalculation after the first adjustment is permanently ignored, not applied and not an error | `EarningLine::recalculate()` while `status === ManuallyAdjusted` records `SystemRecalculationIgnored` | `EarningLineTest::test_recalculation_is_ignored_once_line_has_manual_adjustment`, `EarningLineTest::test_the_freeze_survives_any_number_of_later_recalculations`, `EarningLineTest::test_an_ignored_recalculation_is_recorded_even_when_the_value_would_not_change` |
 | A correction requires a non-empty comment | `Comment` constructor | `CommentTest::test_an_adjustment_may_not_be_explained_by_nothing` (empty, spaces, tab-and-newline datasets) |
+| A comment is at most 500 characters, a specialist id at most 100 — both counted in characters, not bytes | `Comment::MAX_LENGTH`, `SpecialistId::MAX_LENGTH` | `CommentTest::test_it_rejects_a_comment_one_character_too_long`, `CommentTest::test_length_is_counted_in_characters_not_bytes`, `SpecialistIdTest::test_it_rejects_an_identifier_one_character_too_long` |
 | A zero-amount adjustment is refused | `EarningLine::addAdjustment()` | `EarningLineTest::test_an_adjustment_must_change_something` |
 | A cross-currency adjustment is refused | `EarningLine::addAdjustment()` explicit currency check | `EarningLineTest::test_an_adjustment_must_be_in_the_lines_currency` |
 | A correction cannot compensate an adjustment number that was never issued (including itself) | `EarningLine::addAdjustment()` bounds-checks against `lastAdjustmentNumber` | `EarningLineTest::test_a_correction_cannot_point_at_an_adjustment_that_does_not_exist`, `EarningLineTest::test_a_correction_cannot_point_at_the_adjustment_being_created` |
 | A mistake is fixed by a new, linked adjustment, never by altering the one it corrects | `EarningLine::addAdjustment(..., ?AdjustmentNumber $compensates)` — compensation is a link, no mutation of the earlier event | `EarningLineTest::test_a_mistake_is_fixed_by_a_new_adjustment_that_points_at_it`, `EarningLineTest::test_compensation_is_a_link_not_an_enforced_opposite_amount` |
-| A line freezes permanently on its first adjustment; no code path leads back | `EarningLine::applyAdjustmentAdded()` flips `LineStatus` to `ManuallyAdjusted` on `ManualAdjustmentAdded`; no method reverses it | `EarningLineTest::test_an_adjustment_moves_the_current_value_by_its_signed_amount`, `EarningLineTest::test_the_freeze_survives_any_number_of_later_recalculations` |
+| A line freezes permanently on its first adjustment; no code path leads back | `EarningLine::applyAdjustmentAdded()` flips `LineStatus` to `ManuallyAdjusted` on `ManualAdjustmentAdded`; no method reverses it | `EarningLineTest::test_the_freeze_survives_any_number_of_later_recalculations` |
 | Calculating a line that already exists is refused as a duplicate, distinct from a genuine concurrency race | `CalculateEarningLineHandler` checks `EarningLineRepository::exists()` before appending | `CalculateEarningLineHandlerTest::test_calculating_the_same_line_twice_is_refused_as_a_duplicate` |
 | The current value is available at any time without replaying by hand | `EarningLine::currentValue()`, `AuditHistoryView::$currentValue` | `EarningLineTest::test_an_adjustment_moves_the_current_value_by_its_signed_amount`, `AuditHistoryProjectionTest::test_it_reports_every_correction_in_the_order_they_were_made` |
 | The full audit history is available at any time, including ignored recalculations, kept apart from the adjustment list | `AuditHistoryProjection`, `AuditHistoryView` | `AuditHistoryProjectionTest::test_nothing_is_frozen_before_the_first_correction`, `AuditHistoryProjectionTest::test_the_first_correction_freezes_the_system_value`, `AuditHistoryProjectionTest::test_ignored_recalculations_are_not_part_of_the_adjustment_history` |
@@ -231,7 +242,8 @@ Every test name below was checked against
 2. The step-3 comment says "reversing deduction" while the amount is negative.
    The amount is authoritative; the comment is free text.
 3. A line must be system-calculated before it can be adjusted — `calculate()`
-   is the only constructor.
+   is the only way to create a new line (`reconstitute()` is a second public
+   factory, but it replays an existing stream rather than starting one).
 4. Recalculation with an unchanged value records nothing.
 5. Ignored recalculations are recorded for drift visibility but are not part
    of the adjustment history.
