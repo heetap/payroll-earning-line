@@ -7,13 +7,14 @@ payroll specialist may correct manually, permanently and traceably.
 ## Table of contents
 
 1. [What this is](#what-this-is)
-2. [How to run](#how-to-run)
-3. [Domain model](#domain-model)
-4. [Why event sourcing](#why-event-sourcing)
-5. [How each business rule is enforced](#how-each-business-rule-is-enforced)
-6. [Assumptions](#assumptions)
-7. [Trade-offs and what I would do next](#trade-offs-and-what-i-would-do-next)
-8. [How AI was used](#how-ai-was-used)
+2. [Layout](#layout)
+3. [How to run](#how-to-run)
+4. [Domain model](#domain-model)
+5. [Why event sourcing](#why-event-sourcing)
+6. [How each business rule is enforced](#how-each-business-rule-is-enforced)
+7. [Assumptions](#assumptions)
+8. [Trade-offs and what I would do next](#trade-offs-and-what-i-would-do-next)
+9. [How AI was used](#how-ai-was-used)
 
 ## What this is
 
@@ -23,6 +24,45 @@ correct it with a signed amount and a mandatory comment, in a way that can
 never be edited or deleted and that, once applied, permanently stops the
 system from moving the line's value again. It is a library plus one CLI
 script (`bin/scenario.php`) — no framework, no database, no UI.
+
+## Layout
+
+```
+src/
+  Domain/                  the rules. Depends on nothing but PHP.
+    Shared/                concepts both the money and the line need:
+                           Money, Currency, the DomainEvent contract
+    EarningLine/           the aggregate and its vocabulary — EarningLine, plus
+                           the value objects it refuses to exist without
+                           (Comment, SpecialistId, AdjustmentNumber, ...)
+      Event/               the four facts a line can record
+      Exception/           the ways a caller can be told "no"
+  Application/             use cases. Knows Domain, never Infrastructure.
+    Command/               the three writes, each paired with its handler
+    Port/                  what the application needs from the outside world
+    Query/                 the audit read model and the one query that builds it
+  Infrastructure/          adapters. Knows both layers above.
+    Persistence/           the in-memory event store and the repository
+    Clock/                 the only place that reads the wall clock
+    Identity/              UUID generation — the domain never makes identity
+    Cli/                   formatting and the audit table
+
+bin/scenario.php           composition root: wires everything by hand, no container
+tests/                     Unit / Integration / Acceptance / Architecture / Support
+```
+
+Three placements are deliberate rather than habitual:
+
+- **`Exception/` sits next to whatever throws it**, so the failures a class can
+  produce are one directory away from the class, not in a distant error package.
+- **A command and its handler live together.** They change together — a new
+  field on one is a new line in the other — and splitting them by technical kind
+  would put every edit in two folders.
+- **`Port/` is inside `Application`, not `Infrastructure`.** The read side folds
+  the raw event stream without loading the aggregate, so it needs the store; had
+  the port lived in `Infrastructure`, `Application` would depend on it and the
+  layering rule would break at the first query handler. `tests/Architecture`
+  fails the build if either arrow is ever reversed.
 
 ## How to run
 
